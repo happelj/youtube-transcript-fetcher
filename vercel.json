@@ -5,17 +5,13 @@
   "outputDirectory": "artifacts/youtube-transcript/dist/public",
   "fluid": true,
   "functions": {
-    "api/index.ts": {
+    "api/transcript.ts": {
       "maxDuration": 300
     }
   },
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
-    },
-    {
-      "source": "/(.*)",
+      "source": "/((?!api/.*).*)",
       "destination": "/index.html"
     }
   ]
