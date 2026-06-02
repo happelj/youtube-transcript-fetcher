@@ -6,10 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export * from "./errorResponse";
-export * from "./healthStatus";
-export * from "./sermonBoundaries";
-export * from "./sermonBoundaryPoint";
-export * from "./transcriptRequest";
-export * from "./transcriptResponse";
-export * from "./transcriptSegment";
+export * from "./errorResponse.js";
+export * from "./healthStatus.js";
+export * from "./sermonBoundaries.js";
+export * from "./sermonBoundaryPoint.js";
+export * from "./transcriptRequest.js";
+export * from "./transcriptResponse.js";
+export * from "./transcriptSegment.js";

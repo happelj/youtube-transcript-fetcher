@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { SermonBoundaryPoint } from "./sermonBoundaryPoint";
+import type { SermonBoundaryPoint } from "./sermonBoundaryPoint.js";
 
 /**
  * AI-detected sermon boundary result

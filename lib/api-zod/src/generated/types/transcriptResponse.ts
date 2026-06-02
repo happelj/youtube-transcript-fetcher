@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { SermonBoundaries } from "./sermonBoundaries";
-import type { TranscriptSegment } from "./transcriptSegment";
+import type { SermonBoundaries } from "./sermonBoundaries.js";
+import type { TranscriptSegment } from "./transcriptSegment.js";
 
 export interface TranscriptResponse {
   /** YouTube video ID */
