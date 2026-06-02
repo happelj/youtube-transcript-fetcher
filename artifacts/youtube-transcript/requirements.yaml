@@ -1,0 +1,12 @@
+packages:
+  "framer-motion": "For premium smooth page transitions and card reveals"
+  "clsx": "For conditional class merging in beautiful UI components"
+  "tailwind-merge": "For conflict-free Tailwind styling"
+
+images:
+  - path: "artifacts/youtube-transcript/public/images/ambient-bg.png"
+    description: "A very dark, moody abstract background with subtle deep purple and indigo gradients glowing softly from the corners, suitable for a premium dark mode UI, very minimal noise."
+    aspect_ratio: "16:9"
+
+notes:
+  - Integrating with the provided POST /api/transcript via generated @workspace/api-client-react hooks

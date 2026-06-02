@@ -1,0 +1,177 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: transcript
+    description: YouTube transcript operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /transcript:
+    post:
+      operationId: getTranscript
+      tags: [transcript]
+      summary: Get YouTube transcript
+      description: Fetches the transcript/captions for a given YouTube video URL. When sermonMode is true, also runs AI-based sermon boundary detection via OpenAI.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranscriptRequest"
+      responses:
+        "200":
+          description: Transcript fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptResponse"
+        "400":
+          description: Invalid request (bad URL or missing video ID)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No transcript available for this video
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Server error while fetching transcript
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    TranscriptRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          description: YouTube video URL (youtube.com or youtu.be format)
+        sermonMode:
+          type: boolean
+          description: When true, run AI-based sermon boundary detection via OpenAI and return sermon start/end points
+      required:
+        - url
+    TranscriptSegment:
+      type: object
+      properties:
+        text:
+          type: string
+          description: Transcript text for this segment
+        offset:
+          type: number
+          description: Start time offset in milliseconds
+        duration:
+          type: number
+          description: Duration of this segment in milliseconds
+      required:
+        - text
+        - offset
+        - duration
+    SermonBoundaryPoint:
+      type: object
+      description: A detected sermon boundary point (start or end)
+      properties:
+        timestamp:
+          type: string
+          description: "Human-readable timestamp (e.g. '12:43' or '1:02:15')"
+        text:
+          type: string
+          description: The exact transcript text snippet at this boundary point
+        offsetMs:
+          type: number
+          description: Offset from the start of the video in milliseconds
+      required:
+        - timestamp
+        - text
+        - offsetMs
+    SermonBoundaries:
+      type: object
+      description: AI-detected sermon boundary result
+      properties:
+        method:
+          type: string
+          description: Always "openai" — no heuristic fallback is used
+        start:
+          $ref: "#/components/schemas/SermonBoundaryPoint"
+        end:
+          $ref: "#/components/schemas/SermonBoundaryPoint"
+        confidence:
+          type: string
+          description: "AI-reported confidence level: 'high', 'medium', or 'low'"
+        reasoningSummary:
+          type: string
+          description: Brief explanation from the AI of how it identified the boundaries
+        error:
+          type: boolean
+          description: When true, AI detection failed and no boundaries are available
+        message:
+          type: string
+          description: Human-readable failure message (only present when error is true)
+      required:
+        - method
+        - error
+    TranscriptResponse:
+      type: object
+      properties:
+        videoId:
+          type: string
+          description: YouTube video ID
+        url:
+          type: string
+          description: Original video URL
+        fullText:
+          type: string
+          description: Full transcript as plain text
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/TranscriptSegment"
+          description: Individual transcript segments with timestamps
+        sermon:
+          $ref: "#/components/schemas/SermonBoundaries"
+          description: AI sermon boundary detection results (only present when sermonMode was true)
+      required:
+        - videoId
+        - url
+        - fullText
+        - segments
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+      required:
+        - error
