@@ -17,7 +17,6 @@
     "typecheck": "pnpm run typecheck:libs && pnpm --filter @workspace/api-server --filter @workspace/youtube-transcript --filter ./scripts --if-present run typecheck"
   },
   "devDependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.60.1",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",
     "prettier": "^3.8.1",
