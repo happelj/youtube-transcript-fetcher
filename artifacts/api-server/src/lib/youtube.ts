@@ -4,15 +4,16 @@
  * without shelling out to Python.
  */
 
-import {
-  fetchTranscript as fetchYoutubeTranscript,
-  YoutubeTranscriptDisabledError,
-  YoutubeTranscriptNotAvailableError,
-  YoutubeTranscriptNotAvailableLanguageError,
-  YoutubeTranscriptTooManyRequestError,
-  YoutubeTranscriptVideoUnavailableError,
-  type TranscriptResponse as YoutubeTranscriptSegment,
-} from "youtube-transcript";
+import { createRequire } from "node:module";
+import type { TranscriptResponse as YoutubeTranscriptSegment } from "youtube-transcript";
+
+const require = createRequire(import.meta.url);
+const { fetchTranscript: fetchYoutubeTranscript } = require("youtube-transcript") as {
+  fetchTranscript: (
+    videoId: string,
+    config?: { lang?: string },
+  ) => Promise<YoutubeTranscriptSegment[]>;
+};
 
 /**
  * Extracts the YouTube video ID from various URL formats.
@@ -104,21 +105,16 @@ export class TranscriptError extends Error {
 }
 
 function mapTranscriptLibraryError(err: unknown): TranscriptError {
-  if (err instanceof YoutubeTranscriptDisabledError) {
-    return new TranscriptError(
-      "Transcripts are disabled for this video. The creator may have turned off captions.",
-      "disabled",
-    );
-  }
+  const message = err instanceof Error ? err.message : String(err);
+  const errorName = err instanceof Error ? err.name : "";
+  const normalized = message.toLowerCase();
+  const normalizedName = errorName.toLowerCase();
 
-  if (err instanceof YoutubeTranscriptVideoUnavailableError) {
-    return new TranscriptError(
-      "This video is unavailable or does not exist. Please check the URL.",
-      "not_found",
-    );
-  }
-
-  if (err instanceof YoutubeTranscriptTooManyRequestError) {
+  if (
+    normalizedName.includes("toomany") ||
+    normalized.includes("too many") ||
+    normalized.includes("captcha")
+  ) {
     return new TranscriptError(
       "YouTube is rate limiting transcript requests from this server. Please try again later.",
       "too_many_requests",
@@ -126,26 +122,10 @@ function mapTranscriptLibraryError(err: unknown): TranscriptError {
   }
 
   if (
-    err instanceof YoutubeTranscriptNotAvailableError ||
-    err instanceof YoutubeTranscriptNotAvailableLanguageError
+    normalizedName.includes("unavailable") ||
+    normalized.includes("video is no longer available") ||
+    normalized.includes("invalid video")
   ) {
-    return new TranscriptError(
-      "No transcript found for this video. It may not have captions available.",
-      "disabled",
-    );
-  }
-
-  const message = err instanceof Error ? err.message : String(err);
-  const normalized = message.toLowerCase();
-
-  if (normalized.includes("too many") || normalized.includes("captcha")) {
-    return new TranscriptError(
-      "YouTube is rate limiting transcript requests from this server. Please try again later.",
-      "too_many_requests",
-    );
-  }
-
-  if (normalized.includes("unavailable") || normalized.includes("invalid video")) {
     return new TranscriptError(
       "This video is unavailable or does not exist. Please check the URL.",
       "not_found",
@@ -155,7 +135,8 @@ function mapTranscriptLibraryError(err: unknown): TranscriptError {
   if (
     normalized.includes("disabled") ||
     normalized.includes("no transcripts") ||
-    normalized.includes("not available")
+    normalized.includes("not available") ||
+    normalized.includes("available languages")
   ) {
     return new TranscriptError(
       "No transcript found for this video. It may not have captions available.",
@@ -166,6 +147,17 @@ function mapTranscriptLibraryError(err: unknown): TranscriptError {
   return new TranscriptError(
     "Failed to fetch transcript data. Please try again.",
     "unknown",
+  );
+}
+
+function isLanguageUnavailableError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("available languages") ||
+    normalized.includes("no transcripts are available in en") ||
+    normalized.includes("no transcripts are available in english")
   );
 }
 
@@ -183,8 +175,8 @@ function normalizeTranscriptTiming(
 }
 
 /**
- * Fetches the transcript for a given YouTube video ID using Python's
- * youtube-transcript-api library.
+ * Fetches the transcript for a given YouTube video ID using the Node
+ * youtube-transcript library.
  *
  * @param videoId - The 11-character YouTube video ID
  * @returns Array of transcript segments with text and timing data (offset/duration in ms)
@@ -197,7 +189,7 @@ export async function fetchTranscript(videoId: string): Promise<TranscriptSegmen
     try {
       segments = await fetchYoutubeTranscript(videoId, { lang: "en" });
     } catch (err: unknown) {
-      if (!(err instanceof YoutubeTranscriptNotAvailableLanguageError)) {
+      if (!isLanguageUnavailableError(err)) {
         throw err;
       }
       segments = await fetchYoutubeTranscript(videoId);
