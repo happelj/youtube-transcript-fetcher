@@ -10,12 +10,12 @@
  * No heuristic fallback is used — if OpenAI detection fails, sermon.error is true.
  */
 
-import { Router, type IRouter } from "express";
+import { Router } from "express";
 import { extractVideoId, fetchTranscript, TranscriptError } from "../lib/youtube.js";
 import { GetTranscriptBody, GetTranscriptResponse } from "@workspace/api-zod";
 import { detectSermonBoundariesWithAI } from "../lib/openaiSermonDetector.js";
 
-const router: IRouter = Router();
+const router = Router();
 
 router.post("/transcript", async (req, res): Promise<void> => {
   // Validate request body using generated Zod schema
