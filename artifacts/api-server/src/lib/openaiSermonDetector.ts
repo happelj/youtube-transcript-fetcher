@@ -1,3 +1,5 @@
+/// <reference types="node" />
+
 /**
  * AI-based Sermon Boundary Detection
  *
