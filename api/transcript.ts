@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+
 import type {
   TranscriptResponse as YoutubeTranscriptSegment,
 } from "youtube-transcript";

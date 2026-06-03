@@ -1,3 +1,5 @@
+/// <reference lib="dom" />
+
 const responseHeaders = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,OPTIONS",
