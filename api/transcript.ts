@@ -447,9 +447,6 @@ async function fetchTranscript(videoId: string): Promise<TranscriptSegment[]> {
         }
       } catch (err: unknown) {
         libraryError = err;
-        if (config && !isLanguageUnavailableError(err)) {
-          break;
-        }
       }
     }
 
