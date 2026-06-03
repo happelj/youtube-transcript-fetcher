@@ -36,6 +36,20 @@ type YoutubeTranscriptModule = {
   fetchTranscript: FetchYoutubeTranscript;
 };
 
+type CaptionTrack = {
+  baseUrl?: string;
+  languageCode?: string;
+  kind?: string;
+};
+
+type PlayerResponse = {
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: CaptionTrack[];
+    };
+  };
+};
+
 let fetchYoutubeTranscriptPromise:
   | Promise<FetchYoutubeTranscript>
   | undefined;
@@ -178,6 +192,22 @@ function isLanguageUnavailableError(err: unknown): boolean {
   );
 }
 
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_match, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 10)),
+    );
+}
+
 function normalizeTranscriptTiming(
   segments: YoutubeTranscriptSegment[],
 ): TranscriptSegment[] {
@@ -191,28 +221,246 @@ function normalizeTranscriptTiming(
   }));
 }
 
+function parseCaptionXml(xml: string): YoutubeTranscriptSegment[] {
+  const srv3Segments: YoutubeTranscriptSegment[] = [];
+  const srv3Pattern = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+  let srv3Match: RegExpExecArray | null;
+
+  while ((srv3Match = srv3Pattern.exec(xml)) !== null) {
+    const body = srv3Match[3];
+    const sentencePattern = /<s[^>]*>([^<]*)<\/s>/g;
+    let sentenceMatch: RegExpExecArray | null;
+    let text = "";
+
+    while ((sentenceMatch = sentencePattern.exec(body)) !== null) {
+      text += sentenceMatch[1];
+    }
+
+    text ||= body.replace(/<[^>]+>/g, "");
+    text = decodeHtmlEntities(text).trim();
+
+    if (text) {
+      srv3Segments.push({
+        text,
+        offset: Number.parseInt(srv3Match[1], 10),
+        duration: Number.parseInt(srv3Match[2], 10),
+      });
+    }
+  }
+
+  if (srv3Segments.length > 0) {
+    return srv3Segments;
+  }
+
+  return [...xml.matchAll(/<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g)]
+    .map((match) => ({
+      text: decodeHtmlEntities(match[3]).trim(),
+      offset: Number.parseFloat(match[1]),
+      duration: Number.parseFloat(match[2]),
+    }))
+    .filter((segment) => segment.text);
+}
+
+function extractJsonObjectAfter(source: string, needle: string): unknown {
+  const needleIndex = source.indexOf(needle);
+  if (needleIndex === -1) {
+    return undefined;
+  }
+
+  const start = source.indexOf("{", needleIndex + needle.length);
+  if (start === -1) {
+    return undefined;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === "\\") {
+        escaping = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(source.slice(start, index + 1));
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function getCaptionTracks(playerResponse: unknown): CaptionTrack[] {
+  const response = playerResponse as PlayerResponse | undefined;
+  const tracks =
+    response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+
+  return Array.isArray(tracks) ? tracks : [];
+}
+
+async function fetchPlayerResponseFromInnerTube(
+  videoId: string,
+): Promise<PlayerResponse | undefined> {
+  const response = await fetch(
+    "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "user-agent":
+          "com.google.android.youtube/20.10.38 (Linux; U; Android 14)",
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: "ANDROID",
+            clientVersion: "20.10.38",
+          },
+        },
+        videoId,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  return (await response.json()) as PlayerResponse;
+}
+
+async function fetchPlayerResponseFromWatchPage(
+  videoId: string,
+): Promise<PlayerResponse | undefined> {
+  const response = await fetch(
+    `https://www.youtube.com/watch?v=${videoId}&hl=en&gl=US&bpctr=9999999999&has_verified=1`,
+    {
+      headers: {
+        "accept-language": "en-US,en;q=0.9",
+        cookie: "CONSENT=YES+cb.20210328-17-p0.en+FX+917",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+    },
+  );
+
+  if (!response.ok) {
+    return undefined;
+  }
+
+  const html = await response.text();
+  return extractJsonObjectAfter(html, "ytInitialPlayerResponse") as
+    | PlayerResponse
+    | undefined;
+}
+
+function selectCaptionTrack(tracks: CaptionTrack[]): CaptionTrack | undefined {
+  return (
+    tracks.find((track) => track.languageCode === "en") ??
+    tracks.find((track) => track.languageCode?.startsWith("en")) ??
+    tracks.find((track) => track.kind !== "asr") ??
+    tracks[0]
+  );
+}
+
+async function fetchTranscriptFromCaptionTracks(
+  videoId: string,
+): Promise<TranscriptSegment[]> {
+  const responses = await Promise.allSettled([
+    fetchPlayerResponseFromInnerTube(videoId),
+    fetchPlayerResponseFromWatchPage(videoId),
+  ]);
+
+  for (const result of responses) {
+    if (result.status !== "fulfilled") {
+      continue;
+    }
+
+    const tracks = getCaptionTracks(result.value);
+    const track = selectCaptionTrack(tracks);
+
+    if (!track?.baseUrl) {
+      continue;
+    }
+
+    const captionUrl = new URL(track.baseUrl);
+    if (!captionUrl.hostname.endsWith(".youtube.com")) {
+      continue;
+    }
+
+    const response = await fetch(captionUrl, {
+      headers: {
+        "accept-language": track.languageCode ?? "en",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+      },
+    });
+
+    if (!response.ok) {
+      continue;
+    }
+
+    const segments = parseCaptionXml(await response.text());
+    if (segments.length > 0) {
+      return normalizeTranscriptTiming(segments);
+    }
+  }
+
+  throw new TranscriptError(
+    "No transcript segments found for this video.",
+    "disabled",
+  );
+}
+
 async function fetchTranscript(videoId: string): Promise<TranscriptSegment[]> {
   try {
     const fetchYoutubeTranscript = await getYoutubeTranscriptFetcher();
-    let segments: YoutubeTranscriptSegment[];
+    let libraryError: unknown;
+
+    for (const config of [{ lang: "en" }, undefined]) {
+      try {
+        const segments = await fetchYoutubeTranscript(videoId, config);
+        if (segments.length > 0) {
+          return normalizeTranscriptTiming(segments);
+        }
+      } catch (err: unknown) {
+        libraryError = err;
+        if (config && !isLanguageUnavailableError(err)) {
+          break;
+        }
+      }
+    }
 
     try {
-      segments = await fetchYoutubeTranscript(videoId, { lang: "en" });
+      return await fetchTranscriptFromCaptionTracks(videoId);
     } catch (err: unknown) {
-      if (!isLanguageUnavailableError(err)) {
-        throw err;
+      if (libraryError) {
+        throw mapTranscriptLibraryError(libraryError);
       }
-      segments = await fetchYoutubeTranscript(videoId);
+      throw err;
     }
-
-    if (segments.length === 0) {
-      throw new TranscriptError(
-        "No transcript segments found for this video.",
-        "disabled",
-      );
-    }
-
-    return normalizeTranscriptTiming(segments);
   } catch (err: unknown) {
     if (err instanceof TranscriptError) {
       throw err;
