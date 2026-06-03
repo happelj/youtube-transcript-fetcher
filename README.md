@@ -6,7 +6,8 @@ Vite + React frontend with an Express API for fetching YouTube captions and opti
 
 - `artifacts/youtube-transcript`: React/Vite web app.
 - `artifacts/api-server`: Express API routes and transcript logic.
-- `api/index.ts`: Vercel Function entrypoint for the Express API.
+- `api/healthz.ts`: Vercel health-check function.
+- `api/transcript.ts`: Vercel transcript function.
 - `vercel.json`: Vercel build, output, function, and rewrite configuration.
 
 ## Requirements
@@ -52,6 +53,6 @@ Import the GitHub repository into Vercel from the repository root. The checked-i
 - Install command: `pnpm install --frozen-lockfile`
 - Build command: `pnpm run build`
 - Output directory: `artifacts/youtube-transcript/dist/public`
-- API function: `api/index.ts`
+- API functions: `api/healthz.ts` and `api/transcript.ts`
 
 Add `OPENAI_API_KEY` in Vercel Project Settings only if you want sermon mode to work.

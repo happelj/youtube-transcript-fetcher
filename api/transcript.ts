@@ -1,11 +1,6 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
 import type {
   TranscriptResponse as YoutubeTranscriptSegment,
 } from "youtube-transcript";
-
-type ApiRequest = IncomingMessage & {
-  body?: unknown;
-};
 
 type TranscriptSegment = {
   text: string;
@@ -50,39 +45,20 @@ async function getYoutubeTranscriptFetcher(): Promise<FetchYoutubeTranscript> {
   return fetchYoutubeTranscriptPromise;
 }
 
-function sendJson(
-  res: ServerResponse,
+const responseHeaders = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "POST,OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
+
+function jsonResponse(
   statusCode: number,
   body: Record<string, unknown>,
-): void {
-  res.statusCode = statusCode;
-  res.setHeader("content-type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(body));
-}
-
-function setCommonHeaders(res: ServerResponse): void {
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "POST,OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
-}
-
-async function readJsonBody(req: ApiRequest): Promise<unknown> {
-  if (req.body && typeof req.body === "object") {
-    return req.body;
-  }
-
-  if (typeof req.body === "string") {
-    return JSON.parse(req.body);
-  }
-
-  const chunks: Buffer[] = [];
-
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : {};
+): Response {
+  return Response.json(body, {
+    status: statusCode,
+    headers: responseHeaders,
+  });
 }
 
 function isRequestBody(value: unknown): value is {
@@ -244,44 +220,24 @@ async function fetchTranscript(videoId: string): Promise<TranscriptSegment[]> {
   }
 }
 
-export default async function handler(
-  req: ApiRequest,
-  res: ServerResponse,
-): Promise<void> {
-  setCommonHeaders(res);
-
-  const method = req.method?.toUpperCase() ?? "GET";
-
-  if (method === "OPTIONS") {
-    res.statusCode = 204;
-    res.end();
-    return;
-  }
-
-  if (method !== "POST") {
-    sendJson(res, 405, { error: "Method not allowed." });
-    return;
-  }
-
+export async function POST(request: Request): Promise<Response> {
   try {
-    const body = await readJsonBody(req);
+    const body = await request.json();
 
     if (!isRequestBody(body)) {
-      sendJson(res, 400, {
+      return jsonResponse(400, {
         error: "Invalid request. Please provide a YouTube URL.",
       });
-      return;
     }
 
     const { url, sermonMode } = body;
     const videoId = extractVideoId(url);
 
     if (!videoId) {
-      sendJson(res, 400, {
+      return jsonResponse(400, {
         error:
           "Could not find a valid video ID in the URL. Please use a standard YouTube link (e.g. https://www.youtube.com/watch?v=...) or a youtu.be short link.",
       });
-      return;
     }
 
     const segments = await fetchTranscript(videoId);
@@ -296,7 +252,7 @@ export default async function handler(
       sermon = result as unknown as Record<string, unknown>;
     }
 
-    sendJson(res, 200, {
+    return jsonResponse(200, {
       videoId,
       url,
       fullText,
@@ -305,45 +261,62 @@ export default async function handler(
     });
   } catch (err: unknown) {
     if (err instanceof SyntaxError) {
-      sendJson(res, 400, {
+      return jsonResponse(400, {
         error: "Invalid JSON request body.",
       });
-      return;
     }
 
     if (err instanceof TranscriptError) {
       switch (err.reason) {
         case "disabled":
-          sendJson(res, 404, {
+          return jsonResponse(404, {
             error:
               "Transcripts are disabled or unavailable for this video. The creator may have turned off captions.",
           });
-          return;
         case "not_found":
-          sendJson(res, 404, {
+          return jsonResponse(404, {
             error: "This video could not be found. Please check the URL and try again.",
           });
-          return;
         case "too_many_requests":
-          sendJson(res, 429, {
+          return jsonResponse(429, {
             error: "Too many requests to YouTube. Please wait a moment and try again.",
           });
-          return;
         case "parse_error":
-          sendJson(res, 500, {
+          return jsonResponse(500, {
             error: "Could not parse the transcript data. Please try again later.",
           });
-          return;
         default:
-          sendJson(res, 500, { error: err.message });
-          return;
+          return jsonResponse(500, { error: err.message });
       }
     }
 
     console.error("Transcript API error:", err);
-    sendJson(res, 500, {
+    return jsonResponse(500, {
       error:
         "An unexpected error occurred while fetching the transcript. Please try again in a moment.",
     });
   }
 }
+
+export function OPTIONS(): Response {
+  return new Response(null, {
+    status: 204,
+    headers: responseHeaders,
+  });
+}
+
+export default {
+  fetch(request: Request): Promise<Response> | Response {
+    const method = request.method.toUpperCase();
+
+    if (method === "OPTIONS") {
+      return OPTIONS();
+    }
+
+    if (method === "POST") {
+      return POST(request);
+    }
+
+    return jsonResponse(405, { error: "Method not allowed." });
+  },
+};
