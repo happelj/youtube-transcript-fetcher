@@ -10,6 +10,15 @@ type TranscriptSegment = {
   duration: number;
 };
 
+type TranscriptUnavailableResponse = {
+  videoId: string;
+  url: string;
+  fullText: "";
+  segments: [];
+  unavailable: true;
+  message: string;
+};
+
 type TranscriptErrorReason =
   | "disabled"
   | "not_found"
@@ -75,6 +84,21 @@ function jsonResponse(
     status: statusCode,
     headers: responseHeaders,
   });
+}
+
+function transcriptUnavailableResponse(
+  videoId: string,
+  url: string,
+): TranscriptUnavailableResponse {
+  return {
+    videoId,
+    url,
+    fullText: "",
+    segments: [],
+    unavailable: true,
+    message:
+      "No public transcript is available for this video. YouTube may not expose captions for it from this server.",
+  };
 }
 
 function isRequestBody(value: unknown): value is {
@@ -487,7 +511,17 @@ export async function POST(request: Request): Promise<Response> {
       });
     }
 
-    const segments = await fetchTranscript(videoId);
+    let segments: TranscriptSegment[];
+
+    try {
+      segments = await fetchTranscript(videoId);
+    } catch (err: unknown) {
+      if (err instanceof TranscriptError && err.reason === "disabled") {
+        return jsonResponse(200, transcriptUnavailableResponse(videoId, url));
+      }
+      throw err;
+    }
+
     const fullText = segments.map((segment) => segment.text).join(" ");
     let sermon: Record<string, unknown> | undefined;
 

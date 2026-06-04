@@ -5,6 +5,11 @@ import { useGetTranscript } from "@workspace/api-client-react";
 import { TranscriptResult } from "@/components/TranscriptResult";
 import { SermonCard } from "@/components/SermonCard";
 
+type TranscriptUnavailableResult = {
+  unavailable?: boolean;
+  message?: string;
+};
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [sermonMode, setSermonMode] = useState(false);
@@ -25,12 +30,21 @@ export default function Home() {
   const getErrorMessage = () => {
     if (!error) return null;
     const errObj = error as any;
-    return errObj?.response?.data?.error
+    return errObj?.data?.error
+      || errObj?.response?.data?.error
       || errObj?.message
       || "An unexpected error occurred while fetching the transcript.";
   };
 
   const errorMessage = getErrorMessage();
+  const unavailableResult = data as
+    | (TranscriptUnavailableResult & typeof data)
+    | undefined;
+  const unavailableMessage =
+    unavailableResult?.unavailable
+      ? unavailableResult.message ||
+        "No public transcript is available for this video."
+      : null;
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative z-10">
@@ -152,8 +166,28 @@ export default function Home() {
           )}
         </AnimatePresence>
 
+        {/* Transcript unavailable state */}
+        <AnimatePresence>
+          {unavailableMessage && !isPending && !error && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, y: -10 }}
+              animate={{ opacity: 1, height: "auto", y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -10 }}
+              className="w-full mt-4"
+            >
+              <div className="p-4 bg-primary/10 border border-primary/20 rounded-xl flex items-start gap-3 backdrop-blur-sm">
+                <AlertCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="font-medium text-foreground">Transcript Unavailable</h3>
+                  <p className="text-sm text-muted-foreground mt-1">{unavailableMessage}</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Results */}
-        {data && !isPending && !error && (
+        {data && !unavailableMessage && !isPending && !error && (
           <>
             {/* Sermon boundary card — only when sermon mode was requested */}
             {data.sermon && (
