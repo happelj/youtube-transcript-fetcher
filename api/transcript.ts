@@ -419,10 +419,12 @@ async function fetchTranscriptFromCaptionTracks(
 
   for (const result of responses) {
     if (result.status !== "fulfilled") {
+      console.warn("[transcript] player response failed", videoId, result.reason);
       continue;
     }
 
     const tracks = getCaptionTracks(result.value);
+    console.log("[transcript] caption tracks", videoId, tracks.length);
     const track = selectCaptionTrack(tracks);
 
     if (!track?.baseUrl) {
@@ -441,6 +443,8 @@ async function fetchTranscriptFromCaptionTracks(
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
       },
     });
+
+    console.log("[transcript] caption fetch", videoId, response.status);
 
     if (!response.ok) {
       continue;
@@ -467,16 +471,35 @@ async function fetchTranscript(videoId: string): Promise<TranscriptSegment[]> {
       try {
         const segments = await fetchYoutubeTranscript(videoId, config);
         if (segments.length > 0) {
+          console.log(
+            "[transcript] library success",
+            videoId,
+            config?.lang ?? "default",
+            segments.length,
+          );
           return normalizeTranscriptTiming(segments);
         }
       } catch (err: unknown) {
+        console.warn(
+          "[transcript] library failed",
+          videoId,
+          config?.lang ?? "default",
+          err instanceof Error ? err.message : String(err),
+        );
         libraryError = err;
       }
     }
 
     try {
-      return await fetchTranscriptFromCaptionTracks(videoId);
+      const segments = await fetchTranscriptFromCaptionTracks(videoId);
+      console.log("[transcript] fallback success", videoId, segments.length);
+      return segments;
     } catch (err: unknown) {
+      console.warn(
+        "[transcript] fallback failed",
+        videoId,
+        err instanceof Error ? err.message : String(err),
+      );
       if (libraryError) {
         throw mapTranscriptLibraryError(libraryError);
       }
