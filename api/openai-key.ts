@@ -6,10 +6,12 @@ import {
   getOpenAiKeyStatus,
   isValidOpenAiApiKey,
 } from "./lib/openai-key.js";
+import { rejectUntrustedSameOriginRequest } from "./lib/security.js";
 
 const responseHeaders = {
   "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
   "access-control-allow-headers": "content-type",
+  "cache-control": "no-store",
 };
 
 function jsonResponse(
@@ -40,6 +42,14 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    const rejection = rejectUntrustedSameOriginRequest(
+      request,
+      responseHeaders,
+    );
+    if (rejection) {
+      return rejection;
+    }
+
     const body = await request.json();
 
     if (!isSaveKeyBody(body) || !isValidOpenAiApiKey(body.apiKey)) {
@@ -85,6 +95,11 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
+  const rejection = rejectUntrustedSameOriginRequest(request, responseHeaders);
+  if (rejection) {
+    return rejection;
+  }
+
   return jsonResponse(
     200,
     await getOpenAiKeyStatus(

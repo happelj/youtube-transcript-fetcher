@@ -1,9 +1,11 @@
 /// <reference lib="dom" />
 
-import type {
-  TranscriptResponse as YoutubeTranscriptSegment,
-} from "youtube-transcript";
-import { getOpenAiApiKeyForRequest } from "./lib/openai-key.js";
+import type { TranscriptResponse as YoutubeTranscriptSegment } from "youtube-transcript";
+import {
+  getOpenAiApiKeyForRequest,
+  isValidOpenAiApiKey,
+} from "./lib/openai-key.js";
+import { rejectUntrustedSameOriginRequest } from "./lib/security.js";
 
 type TranscriptSegment = {
   text: string;
@@ -71,9 +73,7 @@ type TranscriptServiceSegment = {
   duration?: number;
 };
 
-let fetchYoutubeTranscriptPromise:
-  | Promise<FetchYoutubeTranscript>
-  | undefined;
+let fetchYoutubeTranscriptPromise: Promise<FetchYoutubeTranscript> | undefined;
 let transcriptServiceAuth: TranscriptServiceAuth | undefined;
 let transcriptServiceAuthPromise: Promise<TranscriptServiceAuth> | undefined;
 
@@ -88,7 +88,6 @@ async function getYoutubeTranscriptFetcher(): Promise<FetchYoutubeTranscript> {
 }
 
 const responseHeaders = {
-  "access-control-allow-origin": "*",
   "access-control-allow-methods": "POST,OPTIONS",
   "access-control-allow-headers": "content-type",
 };
@@ -121,6 +120,7 @@ function transcriptUnavailableResponse(
 function isRequestBody(value: unknown): value is {
   url: string;
   sermonMode?: boolean;
+  openAiApiKey?: string;
 } {
   if (!value || typeof value !== "object") {
     return false;
@@ -130,7 +130,10 @@ function isRequestBody(value: unknown): value is {
 
   return (
     typeof body["url"] === "string" &&
-    (body["sermonMode"] === undefined || typeof body["sermonMode"] === "boolean")
+    (body["sermonMode"] === undefined ||
+      typeof body["sermonMode"] === "boolean") &&
+    (body["openAiApiKey"] === undefined ||
+      typeof body["openAiApiKey"] === "string")
   );
 }
 
@@ -257,7 +260,7 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
+    .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) =>
@@ -265,7 +268,7 @@ function decodeHtmlEntities(value: string): string {
     )
     .replace(/&#(\d+);/g, (_match, code: string) =>
       String.fromCodePoint(Number.parseInt(code, 10)),
-  );
+    );
 }
 
 async function requestTranscriptServiceAuth(): Promise<TranscriptServiceAuth> {
@@ -307,7 +310,10 @@ async function requestTranscriptServiceAuth(): Promise<TranscriptServiceAuth> {
 }
 
 async function getTranscriptServiceAuth(): Promise<TranscriptServiceAuth> {
-  if (transcriptServiceAuth && transcriptServiceAuth.expiresAt > Date.now() + 60_000) {
+  if (
+    transcriptServiceAuth &&
+    transcriptServiceAuth.expiresAt > Date.now() + 60_000
+  ) {
     return transcriptServiceAuth;
   }
 
@@ -365,7 +371,9 @@ function parseCaptionXml(xml: string): YoutubeTranscriptSegment[] {
     return srv3Segments;
   }
 
-  return [...xml.matchAll(/<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g)]
+  return [
+    ...xml.matchAll(/<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g),
+  ]
     .map((match) => ({
       text: decodeHtmlEntities(match[3]).trim(),
       offset: Number.parseFloat(match[1]),
@@ -397,13 +405,13 @@ function extractJsonObjectAfter(source: string, needle: string): unknown {
         escaping = false;
       } else if (char === "\\") {
         escaping = true;
-      } else if (char === "\"") {
+      } else if (char === '"') {
         inString = false;
       }
       continue;
     }
 
-    if (char === "\"") {
+    if (char === '"') {
       inString = true;
       continue;
     }
@@ -595,7 +603,10 @@ function selectTranscriptServiceTrack(
     trackRecords.find((track) => track["language"] === "en") ??
     trackRecords.find((track) => {
       const language = track["language"];
-      return typeof language === "string" && language.toLowerCase().includes("english");
+      return (
+        typeof language === "string" &&
+        language.toLowerCase().includes("english")
+      );
     }) ??
     trackRecords[0]
   );
@@ -612,7 +623,8 @@ function normalizeTranscriptServiceSegments(
 
   for (const value of transcript) {
     const segment = asRecord(value);
-    const text = typeof segment?.["text"] === "string" ? segment["text"].trim() : "";
+    const text =
+      typeof segment?.["text"] === "string" ? segment["text"].trim() : "";
     const startSeconds = parseFiniteNumber(segment?.["start"]);
 
     if (!text || startSeconds === undefined) {
@@ -620,7 +632,8 @@ function normalizeTranscriptServiceSegments(
     }
 
     const durationSeconds =
-      parseFiniteNumber(segment?.["dur"]) ?? parseFiniteNumber(segment?.["duration"]);
+      parseFiniteNumber(segment?.["dur"]) ??
+      parseFiniteNumber(segment?.["duration"]);
 
     rawSegments.push({
       text: text.replace(/\s+/g, " "),
@@ -765,6 +778,24 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const { url, sermonMode } = body;
+    const oneTimeOpenAiApiKey = body.openAiApiKey?.trim();
+
+    if (sermonMode) {
+      const rejection = rejectUntrustedSameOriginRequest(
+        request,
+        responseHeaders,
+      );
+      if (rejection) {
+        return rejection;
+      }
+
+      if (oneTimeOpenAiApiKey && !isValidOpenAiApiKey(oneTimeOpenAiApiKey)) {
+        return jsonResponse(400, {
+          error: "Enter a valid OpenAI API key.",
+        });
+      }
+    }
+
     const videoId = extractVideoId(url);
 
     if (!videoId) {
@@ -789,12 +820,11 @@ export async function POST(request: Request): Promise<Response> {
     let sermon: Record<string, unknown> | undefined;
 
     if (sermonMode) {
-      const { detectSermonBoundariesWithAI } = await import(
-        "../artifacts/api-server/src/lib/openaiSermonDetector.js"
-      );
+      const { detectSermonBoundariesWithAI } =
+        await import("../artifacts/api-server/src/lib/openaiSermonDetector.js");
       const result = await detectSermonBoundariesWithAI(
         segments,
-        await getOpenAiApiKeyForRequest(request),
+        oneTimeOpenAiApiKey || (await getOpenAiApiKeyForRequest(request)),
       );
       sermon = result as unknown as Record<string, unknown>;
     }
@@ -822,15 +852,18 @@ export async function POST(request: Request): Promise<Response> {
           });
         case "not_found":
           return jsonResponse(404, {
-            error: "This video could not be found. Please check the URL and try again.",
+            error:
+              "This video could not be found. Please check the URL and try again.",
           });
         case "too_many_requests":
           return jsonResponse(429, {
-            error: "Too many requests to YouTube. Please wait a moment and try again.",
+            error:
+              "Too many requests to YouTube. Please wait a moment and try again.",
           });
         case "parse_error":
           return jsonResponse(500, {
-            error: "Could not parse the transcript data. Please try again later.",
+            error:
+              "Could not parse the transcript data. Please try again later.",
           });
         default:
           return jsonResponse(500, { error: err.message });

@@ -14,6 +14,8 @@ export interface TranscriptRequest {
   url: string;
   /** When true, run AI-based sermon boundary detection via OpenAI and return sermon start/end points */
   sermonMode?: boolean;
+  /** Optional OpenAI API key used only for this sermon detection request; it is not saved by the server */
+  openAiApiKey?: string;
 }
 
 export interface TranscriptSegment {

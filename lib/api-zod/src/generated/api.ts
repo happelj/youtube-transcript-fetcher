@@ -29,6 +29,12 @@ export const GetTranscriptBody = zod.object({
     .describe(
       "When true, run AI-based sermon boundary detection via OpenAI and return sermon start\/end points",
     ),
+  openAiApiKey: zod
+    .string()
+    .optional()
+    .describe(
+      "Optional OpenAI API key used only for this sermon detection request; it is not saved by the server",
+    ),
 });
 
 export const GetTranscriptResponse = zod.object({

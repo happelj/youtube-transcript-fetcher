@@ -81,6 +81,10 @@ components:
         sermonMode:
           type: boolean
           description: When true, run AI-based sermon boundary detection via OpenAI and return sermon start/end points
+        openAiApiKey:
+          type: string
+          writeOnly: true
+          description: Optional OpenAI API key used only for this sermon detection request; it is not saved by the server
       required:
         - url
     TranscriptSegment:

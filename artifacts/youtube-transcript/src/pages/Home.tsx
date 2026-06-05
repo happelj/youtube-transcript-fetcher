@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   AlertCircle,
   CheckCircle2,
+  Clock,
   Eye,
   EyeOff,
   KeyRound,
@@ -32,11 +33,17 @@ type OpenAiKeyMessage = {
   text: string;
 } | null;
 
+type OpenAiKeyMode = "saved" | "once";
+
 const defaultOpenAiKeyStatus: OpenAiKeyStatus = {
   configured: false,
   source: "none",
   storageAvailable: false,
 };
+
+function isValidOpenAiApiKeyInput(apiKey: string): boolean {
+  return /^sk-[A-Za-z0-9_-]{20,}$/.test(apiKey.trim());
+}
 
 async function fetchOpenAiKeyStatus(): Promise<OpenAiKeyStatus> {
   const response = await fetch("/api/openai-key", {
@@ -53,6 +60,7 @@ async function fetchOpenAiKeyStatus(): Promise<OpenAiKeyStatus> {
 export default function Home() {
   const [url, setUrl] = useState("");
   const [sermonMode, setSermonMode] = useState(false);
+  const [openAiKeyMode, setOpenAiKeyMode] = useState<OpenAiKeyMode>("saved");
   const [openAiApiKey, setOpenAiApiKey] = useState("");
   const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
   const [openAiKeyStatus, setOpenAiKeyStatus] = useState<OpenAiKeyStatus>(
@@ -61,7 +69,13 @@ export default function Home() {
   const [openAiKeyPending, setOpenAiKeyPending] = useState(false);
   const [openAiKeyMessage, setOpenAiKeyMessage] =
     useState<OpenAiKeyMessage>(null);
-  const { mutate: fetchTranscript, isPending, data, error, reset } = useGetTranscript();
+  const {
+    mutate: fetchTranscript,
+    isPending,
+    data,
+    error,
+    reset,
+  } = useGetTranscript();
 
   useEffect(() => {
     let canceled = false;
@@ -80,32 +94,82 @@ export default function Home() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
-    if (sermonMode && !openAiKeyStatus.configured) {
-      setOpenAiKeyMessage({
-        type: "error",
-        text: "Save an OpenAI API key first.",
-      });
-      return;
+
+    const oneTimeOpenAiApiKey =
+      sermonMode && openAiKeyMode === "once" ? openAiApiKey.trim() : undefined;
+
+    if (sermonMode) {
+      if (openAiKeyMode === "once" && !isValidOpenAiApiKeyInput(openAiApiKey)) {
+        setOpenAiKeyMessage({
+          type: "error",
+          text: "Enter a valid OpenAI API key.",
+        });
+        return;
+      }
+
+      if (openAiKeyMode === "saved" && !openAiKeyStatus.configured) {
+        setOpenAiKeyMessage({
+          type: "error",
+          text: "Save an OpenAI API key first.",
+        });
+        return;
+      }
     }
-    fetchTranscript({ data: { url, sermonMode } });
+
+    fetchTranscript({
+      data: {
+        url,
+        sermonMode,
+        ...(oneTimeOpenAiApiKey ? { openAiApiKey: oneTimeOpenAiApiKey } : {}),
+      },
+    });
+
+    if (oneTimeOpenAiApiKey) {
+      setOpenAiApiKey("");
+      setShowOpenAiApiKey(false);
+    }
   };
 
   // Retry sermon detection only — re-submit the same URL with sermonMode on
   const handleRetrySermon = () => {
     if (!url.trim()) return;
-    if (!openAiKeyStatus.configured) {
+
+    const oneTimeOpenAiApiKey =
+      openAiKeyMode === "once" ? openAiApiKey.trim() : undefined;
+
+    if (openAiKeyMode === "once" && !isValidOpenAiApiKeyInput(openAiApiKey)) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text: "Enter a valid OpenAI API key.",
+      });
+      return;
+    }
+
+    if (openAiKeyMode === "saved" && !openAiKeyStatus.configured) {
       setOpenAiKeyMessage({
         type: "error",
         text: "Save an OpenAI API key first.",
       });
       return;
     }
-    fetchTranscript({ data: { url, sermonMode: true } });
+
+    fetchTranscript({
+      data: {
+        url,
+        sermonMode: true,
+        ...(oneTimeOpenAiApiKey ? { openAiApiKey: oneTimeOpenAiApiKey } : {}),
+      },
+    });
+
+    if (oneTimeOpenAiApiKey) {
+      setOpenAiApiKey("");
+      setShowOpenAiApiKey(false);
+    }
   };
 
   const handleSaveOpenAiKey = async () => {
     const apiKey = openAiApiKey.trim();
-    if (!/^sk-[A-Za-z0-9_-]{20,}$/.test(apiKey)) {
+    if (!isValidOpenAiApiKeyInput(apiKey)) {
       setOpenAiKeyMessage({
         type: "error",
         text: "Enter a valid OpenAI API key.",
@@ -161,7 +225,9 @@ export default function Home() {
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload?.error || "Could not delete the OpenAI API key.");
+        throw new Error(
+          payload?.error || "Could not delete the OpenAI API key.",
+        );
       }
 
       setOpenAiKeyStatus(payload as OpenAiKeyStatus);
@@ -187,32 +253,36 @@ export default function Home() {
   const getErrorMessage = () => {
     if (!error) return null;
     const errObj = error as any;
-    return errObj?.data?.error
-      || errObj?.response?.data?.error
-      || errObj?.message
-      || "An unexpected error occurred while fetching the transcript.";
+    return (
+      errObj?.data?.error ||
+      errObj?.response?.data?.error ||
+      errObj?.message ||
+      "An unexpected error occurred while fetching the transcript."
+    );
   };
 
   const errorMessage = getErrorMessage();
   const unavailableResult = data as
     | (TranscriptUnavailableResult & typeof data)
     | undefined;
-  const unavailableMessage =
-    unavailableResult?.unavailable
-      ? unavailableResult.message ||
-        "No public transcript is available for this video."
-      : null;
+  const unavailableMessage = unavailableResult?.unavailable
+    ? unavailableResult.message ||
+      "No public transcript is available for this video."
+    : null;
   const openAiStatusLabel =
     openAiKeyStatus.source === "user"
       ? "Saved"
       : openAiKeyStatus.source === "server"
         ? "Server key"
         : "Not saved";
-  const openAiKeyRequired = sermonMode && !openAiKeyStatus.configured;
+  const oneTimeOpenAiKeyReady = isValidOpenAiApiKeyInput(openAiApiKey);
+  const openAiKeyRequired =
+    sermonMode &&
+    ((openAiKeyMode === "saved" && !openAiKeyStatus.configured) ||
+      (openAiKeyMode === "once" && !oneTimeOpenAiKeyReady));
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative z-10">
-
       {/* Subtle decorative background overlay */}
       <img
         src={`${import.meta.env.BASE_URL}images/ambient-bg.png`}
@@ -239,7 +309,8 @@ export default function Home() {
             Fetcher
           </h1>
           <p className="text-lg text-muted-foreground max-w-xl mx-auto font-sans">
-            Instantly extract and download clean, timestamped captions from any public YouTube video.
+            Instantly extract and download clean, timestamped captions from any
+            public YouTube video.
           </p>
         </div>
 
@@ -295,7 +366,11 @@ export default function Home() {
                       stroke="currentColor"
                       strokeWidth={2.5}
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2 6l3 3 5-5" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2 6l3 3 5-5"
+                      />
                     </svg>
                   )}
                 </div>
@@ -325,13 +400,56 @@ export default function Home() {
                     </div>
                     <span
                       className={`rounded-md border px-2 py-1 text-xs font-medium ${
-                        openAiKeyStatus.configured
-                          ? "border-primary/30 bg-primary/10 text-primary"
-                          : "border-border bg-background/40 text-muted-foreground"
+                        openAiKeyMode === "once"
+                          ? oneTimeOpenAiKeyReady
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "border-border bg-background/40 text-muted-foreground"
+                          : openAiKeyStatus.configured
+                            ? "border-primary/30 bg-primary/10 text-primary"
+                            : "border-border bg-background/40 text-muted-foreground"
                       }`}
                     >
-                      {openAiStatusLabel}
+                      {openAiKeyMode === "once"
+                        ? "One-time"
+                        : openAiStatusLabel}
                     </span>
+                  </div>
+
+                  <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg border border-border/80 bg-background/30 p-1">
+                    <button
+                      type="button"
+                      title="Use saved key"
+                      onClick={() => {
+                        setOpenAiKeyMode("saved");
+                        setOpenAiKeyMessage(null);
+                      }}
+                      disabled={openAiKeyPending || isPending}
+                      className={`inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+                        openAiKeyMode === "saved"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Save className="h-4 w-4" />
+                      <span>Saved</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Use once"
+                      onClick={() => {
+                        setOpenAiKeyMode("once");
+                        setOpenAiKeyMessage(null);
+                      }}
+                      disabled={openAiKeyPending || isPending}
+                      className={`inline-flex h-9 items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
+                        openAiKeyMode === "once"
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Clock className="h-4 w-4" />
+                      <span>Use once</span>
+                    </button>
                   </div>
 
                   <div className="flex flex-col gap-2 sm:flex-row">
@@ -341,9 +459,11 @@ export default function Home() {
                         value={openAiApiKey}
                         onChange={(e) => setOpenAiApiKey(e.target.value)}
                         placeholder={
-                          openAiKeyStatus.source === "user"
-                            ? "Replace saved key"
-                            : "sk-..."
+                          openAiKeyMode === "once"
+                            ? "sk-..."
+                            : openAiKeyStatus.source === "user"
+                              ? "Replace saved key"
+                              : "sk-..."
                         }
                         autoComplete="off"
                         spellCheck={false}
@@ -354,7 +474,9 @@ export default function Home() {
                         type="button"
                         title={showOpenAiApiKey ? "Hide key" : "Show key"}
                         onClick={() => setShowOpenAiApiKey((value) => !value)}
-                        disabled={!openAiApiKey || openAiKeyPending || isPending}
+                        disabled={
+                          !openAiApiKey || openAiKeyPending || isPending
+                        }
                         className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       >
                         {showOpenAiApiKey ? (
@@ -365,31 +487,36 @@ export default function Home() {
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handleSaveOpenAiKey}
-                      disabled={openAiKeyPending || isPending || !openAiApiKey.trim()}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/15 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      {openAiKeyPending ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Save className="h-4 w-4" />
-                      )}
-                      <span>Save</span>
-                    </button>
-
-                    {openAiKeyStatus.source === "user" && (
+                    {openAiKeyMode === "saved" && (
                       <button
                         type="button"
-                        onClick={handleDeleteOpenAiKey}
-                        disabled={openAiKeyPending || isPending}
-                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border/80 bg-background/30 px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                        onClick={handleSaveOpenAiKey}
+                        disabled={
+                          openAiKeyPending || isPending || !openAiApiKey.trim()
+                        }
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/15 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:pointer-events-none disabled:opacity-50"
                       >
-                        <Trash2 className="h-4 w-4" />
-                        <span>Delete</span>
+                        {openAiKeyPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                        <span>Save</span>
                       </button>
                     )}
+
+                    {openAiKeyMode === "saved" &&
+                      openAiKeyStatus.source === "user" && (
+                        <button
+                          type="button"
+                          onClick={handleDeleteOpenAiKey}
+                          disabled={openAiKeyPending || isPending}
+                          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border/80 bg-background/30 px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>Delete</span>
+                        </button>
+                      )}
                   </div>
 
                   {openAiKeyMessage && (
@@ -426,7 +553,9 @@ export default function Home() {
               <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl flex items-start gap-3 backdrop-blur-sm">
                 <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <h3 className="font-medium text-destructive">Extraction Failed</h3>
+                  <h3 className="font-medium text-destructive">
+                    Extraction Failed
+                  </h3>
                   <p className="text-sm opacity-90 mt-1">{errorMessage}</p>
                 </div>
               </div>
@@ -446,8 +575,12 @@ export default function Home() {
               <div className="p-4 bg-primary/10 border border-primary/20 rounded-xl flex items-start gap-3 backdrop-blur-sm">
                 <AlertCircle className="w-5 h-5 text-primary shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <h3 className="font-medium text-foreground">Transcript Unavailable</h3>
-                  <p className="text-sm text-muted-foreground mt-1">{unavailableMessage}</p>
+                  <h3 className="font-medium text-foreground">
+                    Transcript Unavailable
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {unavailableMessage}
+                  </p>
                 </div>
               </div>
             </motion.div>
