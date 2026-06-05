@@ -15,7 +15,7 @@
     "build:all": "pnpm run typecheck && pnpm -r --if-present run build",
     "vercel-build": "pnpm run typecheck:libs && pnpm run typecheck:api && pnpm --filter @workspace/api-server run typecheck && pnpm --filter @workspace/youtube-transcript run typecheck && pnpm --filter @workspace/youtube-transcript run build",
     "typecheck:libs": "tsc --build --force",
-    "typecheck:api": "tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --strict --skipLibCheck api/healthz.ts api/transcript.ts",
+    "typecheck:api": "tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --esModuleInterop --strict --skipLibCheck api/healthz.ts api/openai-key.ts api/transcript.ts",
     "typecheck": "pnpm run typecheck:libs && pnpm --filter @workspace/api-server --filter @workspace/youtube-transcript --filter ./scripts --if-present run typecheck"
   },
   "dependencies": {

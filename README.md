@@ -14,7 +14,8 @@ Vite + React frontend with an Express API for fetching YouTube captions and opti
 
 - Node.js 20 or newer.
 - pnpm 10.
-- `OPENAI_API_KEY` only if sermon boundary detection is enabled in the UI.
+- `OPENAI_KEY_ENCRYPTION_SECRET` for user-saved OpenAI API keys.
+- `OPENAI_API_KEY` only if you want one shared server-side fallback key.
 
 ## Local Development
 
@@ -53,6 +54,6 @@ Import the GitHub repository into Vercel from the repository root. The checked-i
 - Install command: `pnpm install --frozen-lockfile`
 - Build command: `pnpm run build`
 - Output directory: `artifacts/youtube-transcript/dist/public`
-- API functions: `api/healthz.ts` and `api/transcript.ts`
+- API functions: `api/healthz.ts`, `api/openai-key.ts`, and `api/transcript.ts`
 
-Add `OPENAI_API_KEY` in Vercel Project Settings only if you want sermon mode to work.
+Add `OPENAI_KEY_ENCRYPTION_SECRET` in Vercel Project Settings before users save their own OpenAI API keys. Use a long random value. `OPENAI_API_KEY` is optional and acts only as a shared fallback key when a user has not saved one.

@@ -1,6 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, Loader2, AlertCircle, Sparkles } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  KeyRound,
+  Loader2,
+  Save,
+  Search,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useGetTranscript } from "@workspace/api-client-react";
 import { TranscriptResult } from "@/components/TranscriptResult";
 import { SermonCard } from "@/components/SermonCard";
@@ -10,21 +21,167 @@ type TranscriptUnavailableResult = {
   message?: string;
 };
 
+type OpenAiKeyStatus = {
+  configured: boolean;
+  source: "user" | "server" | "none";
+  storageAvailable: boolean;
+};
+
+type OpenAiKeyMessage = {
+  type: "success" | "error";
+  text: string;
+} | null;
+
+const defaultOpenAiKeyStatus: OpenAiKeyStatus = {
+  configured: false,
+  source: "none",
+  storageAvailable: false,
+};
+
+async function fetchOpenAiKeyStatus(): Promise<OpenAiKeyStatus> {
+  const response = await fetch("/api/openai-key", {
+    method: "GET",
+  });
+
+  if (!response.ok) {
+    return defaultOpenAiKeyStatus;
+  }
+
+  return (await response.json()) as OpenAiKeyStatus;
+}
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [sermonMode, setSermonMode] = useState(false);
+  const [openAiApiKey, setOpenAiApiKey] = useState("");
+  const [showOpenAiApiKey, setShowOpenAiApiKey] = useState(false);
+  const [openAiKeyStatus, setOpenAiKeyStatus] = useState<OpenAiKeyStatus>(
+    defaultOpenAiKeyStatus,
+  );
+  const [openAiKeyPending, setOpenAiKeyPending] = useState(false);
+  const [openAiKeyMessage, setOpenAiKeyMessage] =
+    useState<OpenAiKeyMessage>(null);
   const { mutate: fetchTranscript, isPending, data, error, reset } = useGetTranscript();
+
+  useEffect(() => {
+    let canceled = false;
+
+    fetchOpenAiKeyStatus().then((status) => {
+      if (!canceled) {
+        setOpenAiKeyStatus(status);
+      }
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
+    if (sermonMode && !openAiKeyStatus.configured) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text: "Save an OpenAI API key first.",
+      });
+      return;
+    }
     fetchTranscript({ data: { url, sermonMode } });
   };
 
   // Retry sermon detection only — re-submit the same URL with sermonMode on
   const handleRetrySermon = () => {
     if (!url.trim()) return;
+    if (!openAiKeyStatus.configured) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text: "Save an OpenAI API key first.",
+      });
+      return;
+    }
     fetchTranscript({ data: { url, sermonMode: true } });
+  };
+
+  const handleSaveOpenAiKey = async () => {
+    const apiKey = openAiApiKey.trim();
+    if (!/^sk-[A-Za-z0-9_-]{20,}$/.test(apiKey)) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text: "Enter a valid OpenAI API key.",
+      });
+      return;
+    }
+
+    setOpenAiKeyPending(true);
+    setOpenAiKeyMessage(null);
+
+    try {
+      const response = await fetch("/api/openai-key", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ apiKey }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not save the OpenAI API key.");
+      }
+
+      setOpenAiKeyStatus(payload as OpenAiKeyStatus);
+      setOpenAiApiKey("");
+      setShowOpenAiApiKey(false);
+      setOpenAiKeyMessage({
+        type: "success",
+        text: "OpenAI API key saved.",
+      });
+    } catch (err: unknown) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text:
+          err instanceof Error
+            ? err.message
+            : "Could not save the OpenAI API key.",
+      });
+    } finally {
+      setOpenAiKeyPending(false);
+    }
+  };
+
+  const handleDeleteOpenAiKey = async () => {
+    setOpenAiKeyPending(true);
+    setOpenAiKeyMessage(null);
+
+    try {
+      const response = await fetch("/api/openai-key", {
+        method: "DELETE",
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not delete the OpenAI API key.");
+      }
+
+      setOpenAiKeyStatus(payload as OpenAiKeyStatus);
+      setOpenAiApiKey("");
+      setShowOpenAiApiKey(false);
+      setOpenAiKeyMessage({
+        type: "success",
+        text: "OpenAI API key deleted.",
+      });
+    } catch (err: unknown) {
+      setOpenAiKeyMessage({
+        type: "error",
+        text:
+          err instanceof Error
+            ? err.message
+            : "Could not delete the OpenAI API key.",
+      });
+    } finally {
+      setOpenAiKeyPending(false);
+    }
   };
 
   const getErrorMessage = () => {
@@ -45,6 +202,13 @@ export default function Home() {
       ? unavailableResult.message ||
         "No public transcript is available for this video."
       : null;
+  const openAiStatusLabel =
+    openAiKeyStatus.source === "user"
+      ? "Saved"
+      : openAiKeyStatus.source === "server"
+        ? "Server key"
+        : "Not saved";
+  const openAiKeyRequired = sermonMode && !openAiKeyStatus.configured;
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative z-10">
@@ -97,7 +261,7 @@ export default function Home() {
             </div>
             <button
               type="submit"
-              disabled={isPending || !url.trim()}
+              disabled={isPending || !url.trim() || openAiKeyRequired}
               className="w-full sm:w-auto px-8 py-4 bg-foreground text-background hover:bg-white rounded-xl font-medium tracking-wide shadow-lg hover:shadow-xl transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
             >
               {isPending ? (
@@ -144,6 +308,110 @@ export default function Home() {
               </span>
             </label>
           </div>
+
+          <AnimatePresence>
+            {sermonMode && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, y: -6 }}
+                animate={{ opacity: 1, height: "auto", y: 0 }}
+                exit={{ opacity: 0, height: 0, y: -6 }}
+                className="mt-3 overflow-hidden"
+              >
+                <div className="rounded-xl border border-border/80 bg-card/35 backdrop-blur-md p-3 shadow-lg">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                      <KeyRound className="h-4 w-4 text-primary" />
+                      <span>OpenAI API Key</span>
+                    </div>
+                    <span
+                      className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                        openAiKeyStatus.configured
+                          ? "border-primary/30 bg-primary/10 text-primary"
+                          : "border-border bg-background/40 text-muted-foreground"
+                      }`}
+                    >
+                      {openAiStatusLabel}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <div className="relative flex-1">
+                      <input
+                        type={showOpenAiApiKey ? "text" : "password"}
+                        value={openAiApiKey}
+                        onChange={(e) => setOpenAiApiKey(e.target.value)}
+                        placeholder={
+                          openAiKeyStatus.source === "user"
+                            ? "Replace saved key"
+                            : "sk-..."
+                        }
+                        autoComplete="off"
+                        spellCheck={false}
+                        disabled={openAiKeyPending || isPending}
+                        className="h-11 w-full rounded-lg border border-border/80 bg-background/40 px-3 pr-10 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50 focus:outline-none disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        title={showOpenAiApiKey ? "Hide key" : "Show key"}
+                        onClick={() => setShowOpenAiApiKey((value) => !value)}
+                        disabled={!openAiApiKey || openAiKeyPending || isPending}
+                        className="absolute right-2 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                      >
+                        {showOpenAiApiKey ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveOpenAiKey}
+                      disabled={openAiKeyPending || isPending || !openAiApiKey.trim()}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-primary/40 bg-primary/15 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/20 disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      {openAiKeyPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                      <span>Save</span>
+                    </button>
+
+                    {openAiKeyStatus.source === "user" && (
+                      <button
+                        type="button"
+                        onClick={handleDeleteOpenAiKey}
+                        disabled={openAiKeyPending || isPending}
+                        className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border/80 bg-background/30 px-4 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Delete</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {openAiKeyMessage && (
+                    <div
+                      className={`mt-2 flex items-center gap-2 text-xs ${
+                        openAiKeyMessage.type === "success"
+                          ? "text-primary"
+                          : "text-destructive"
+                      }`}
+                    >
+                      {openAiKeyMessage.type === "success" ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <AlertCircle className="h-3.5 w-3.5" />
+                      )}
+                      <span>{openAiKeyMessage.text}</span>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </form>
 
         {/* Error State */}

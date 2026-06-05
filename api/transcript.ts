@@ -3,6 +3,7 @@
 import type {
   TranscriptResponse as YoutubeTranscriptSegment,
 } from "youtube-transcript";
+import { getOpenAiApiKeyForRequest } from "./lib/openai-key.js";
 
 type TranscriptSegment = {
   text: string;
@@ -791,7 +792,10 @@ export async function POST(request: Request): Promise<Response> {
       const { detectSermonBoundariesWithAI } = await import(
         "../artifacts/api-server/src/lib/openaiSermonDetector.js"
       );
-      const result = await detectSermonBoundariesWithAI(segments);
+      const result = await detectSermonBoundariesWithAI(
+        segments,
+        await getOpenAiApiKeyForRequest(request),
+      );
       sermon = result as unknown as Record<string, unknown>;
     }
 

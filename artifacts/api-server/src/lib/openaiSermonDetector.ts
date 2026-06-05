@@ -48,8 +48,8 @@ export interface SermonBoundariesResult {
 // OpenAI client
 // ---------------------------------------------------------------------------
 
-function getOpenAIClient(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
+function getOpenAIClient(apiKeyOverride?: string): OpenAI {
+  const apiKey = apiKeyOverride?.trim() || process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is not configured.");
   }
@@ -455,6 +455,7 @@ const ONE_PASS_CHAR_LIMIT = 450_000; // ~112k tokens — safe for gpt-4o 128k co
  */
 export async function detectSermonBoundariesWithAI(
   segments: TranscriptSegment[],
+  apiKey?: string,
 ): Promise<SermonBoundariesResult> {
   // Guard: need at least a few segments
   if (segments.length < 5) {
@@ -468,7 +469,7 @@ export async function detectSermonBoundariesWithAI(
 
   let client: OpenAI;
   try {
-    client = getOpenAIClient();
+    client = getOpenAIClient(apiKey);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[openaiSermonDetector] OpenAI client init failed:", msg);
